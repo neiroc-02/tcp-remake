@@ -88,15 +88,23 @@ int main(int argc, char *argv[])
 				return errno;
 			}
 		}
+
 		/* 6. Inspect data from client */
 		char *client_ip = inet_ntoa(clientaddr.sin_addr); // "Network bytes to address string"
 		int client_port = ntohs(clientaddr.sin_port);	  // Little endian
 		// Print out data
 		write(1, client_buf, bytes_recvd);
 
-		//TODO: PULL FROM STDIN INTO THE BUFFER
-		/*
-		char server_buf[] = "Hello world!";
+		/* 7. Read data from stdin, sending to client */
+		char server_buf[1024];
+		int stdin_bytes = read(0, server_buf, sizeof(server_buf)); //Read the bytes
+		if (stdin_bytes < 0){
+			fprintf(stderr, "FAILED TO READ FROM STDIN");
+			close(sockfd);
+			return errno;
+		}
+		server_buf[stdin_bytes] = '\0'; //Add a null character cause C-strings
+
 		int did_send = sendto(sockfd, server_buf, strlen(server_buf),
 						  	 // socket  send data   how much to send
 						  	 0, (struct sockaddr *)&clientaddr,
@@ -104,15 +112,10 @@ int main(int argc, char *argv[])
 						  	 sizeof(clientaddr));
 
 		if (did_send < 0) {
-			if (certain error code){
-			
-			}
-			else {
-				fprintf(stderr, "ERROR READING FROM STDIN");
-				return errno;
-			}
-		}
-		*/ 
+			fprintf(stderr, "ERROR READING FROM STDIN");
+			close(sockfd);
+			return errno;
+		} 
 	}
 
 	/* 8. You're done! Terminate the connection */
