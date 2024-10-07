@@ -18,7 +18,7 @@ int main() {
     serveraddr.sin_port = htons(SEND_PORT); // Big endian
 
     /* 3. Send data to server */
-    char client_buf[] = "Hello world!";
+    char client_buf[] = "Hello world!\n";
     int did_send = sendto(sockfd, client_buf, strlen(client_buf), 
                        // socket  send data   how much to send
                           0, (struct sockaddr*) &serveraddr, 

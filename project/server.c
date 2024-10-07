@@ -65,18 +65,27 @@ int main(int argc, char *argv[])
 
 	/* 3. Let operating system know about our config */
 	int did_bind = bind(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr)); // Error if did_bind < 0 :(
-	if (did_bind < 0)
-		return errno;
+	if (did_bind < 0) return errno;
+	
+	/*PRETTY CONFIDENT CODE ABOVE THIS POINT IS CORRECT*/
 
-	/* 4. Create buffer to store incoming data */
+	/*
+	// 4. Create buffer to store incoming data 
 	int BUF_SIZE = 1024;
 	char client_buf[BUF_SIZE];
 	struct sockaddr_in clientaddr; // Same information, but about client
 	socklen_t clientsize = sizeof(clientaddr);
+	*/
 
-	/*Looping to check for and send data*/
+	/* Looping to check for and send data */
 	while (1)
 	{
+		/* 4. Create buffer to store incoming data */
+		int BUF_SIZE = 1024;
+		char client_buf[BUF_SIZE];
+		struct sockaddr_in clientaddr; // Same information, but about client
+		socklen_t clientsize = sizeof(clientaddr);
+
 		/* 5. Listen for data from clients */
 		int bytes_recvd = recvfrom(sockfd, client_buf, BUF_SIZE,
 								   // socket  store data  how much
@@ -94,11 +103,9 @@ int main(int argc, char *argv[])
 		}
 		else
 		{
-
 			/* 6. Inspect data from client */
 			char *client_ip = inet_ntoa(clientaddr.sin_addr); // "Network bytes to address string"
 			int client_port = ntohs(clientaddr.sin_port);	  // Little endian
-			// Print out data
 			write(1, client_buf, bytes_recvd);
 		}
 		/* 7. Read data from stdin, sending to client */
@@ -117,8 +124,7 @@ int main(int argc, char *argv[])
 		else
 		{
 			server_buf[stdin_bytes] = '\0'; // Add a null character cause C-strings
-
-			int did_send = sendto(sockfd, server_buf, strlen(server_buf),
+			int did_send = sendto(sockfd, server_buf, stdin_bytes/*strlen(server_buf)*/,
 								  // socket  send data   how much to send
 								  0, (struct sockaddr *)&clientaddr,
 								  // flags   where to send
