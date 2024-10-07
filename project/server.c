@@ -46,12 +46,14 @@ int main(int argc, char *argv[])
 	if (stdin_flags < 0)
 	{
 		fprintf(stderr, "ERROR GETTING STDIN FLAGS");
+		close(sockfd);
 		return errno;
 	}
 	stdin_flags |= O_NONBLOCK;
 	if (fcntl(STDIN_FILENO, F_SETFL, stdin_flags) < 0)
 	{
 		fprintf(stderr, "ERROR SETTING STDIN FLAGS");
+		close(sockfd);
 		return errno;
 	}
 
@@ -67,16 +69,6 @@ int main(int argc, char *argv[])
 	int did_bind = bind(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr)); // Error if did_bind < 0 :(
 	if (did_bind < 0) return errno;
 	
-	/*PRETTY CONFIDENT CODE ABOVE THIS POINT IS CORRECT*/
-
-	/*
-	// 4. Create buffer to store incoming data 
-	int BUF_SIZE = 1024;
-	char client_buf[BUF_SIZE];
-	struct sockaddr_in clientaddr; // Same information, but about client
-	socklen_t clientsize = sizeof(clientaddr);
-	*/
-
 	/* Looping to check for and send data */
 	while (1)
 	{
