@@ -67,9 +67,14 @@ int main(int argc, char *argv[])
 
 	/* 3. Let operating system know about our config */
 	int did_bind = bind(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr)); // Error if did_bind < 0 :(
-	if (did_bind < 0) return errno;
-	
+	if (did_bind < 0){
+		fprintf(stderr, "DID NOT BIND TO OS");
+		close(sockfd);
+		return errno;
+	}
+
 	/* Looping to check for and send data */
+	int hasRead = 0;
 	while (1)
 	{
 		/* 4. Create buffer to store incoming data */
@@ -85,48 +90,49 @@ int main(int argc, char *argv[])
 								   &clientsize);
 		if (bytes_recvd < 0)
 		{
-			if (errno != EAGAIN && errno != EWOULDBLOCK)
+			if (errno != EAGAIN)
 			{
 				fprintf(stderr, "ERROR RECEIVING DATA");
 				close(sockfd);
 				return errno;
 			}
-			continue;
 		}
 		else
 		{
+			hasRead = 1;
 			/* 6. Inspect data from client */
 			char *client_ip = inet_ntoa(clientaddr.sin_addr); // "Network bytes to address string"
 			int client_port = ntohs(clientaddr.sin_port);	  // Little endian
 			write(1, client_buf, bytes_recvd);
 		}
 		/* 7. Read data from stdin, sending to client */
-		char server_buf[1024];
-		int stdin_bytes = read(STDIN_FILENO, server_buf, sizeof(server_buf)); // Read the bytes
-		if (stdin_bytes < 0)
+		if (hasRead == 1)
 		{
-			if (errno != EAGAIN && errno != EWOULDBLOCK)
+			char server_buf[1024];
+			int stdin_bytes = read(STDIN_FILENO, server_buf, sizeof(server_buf)); // Read the bytes
+			if (stdin_bytes < 0)
 			{
-				fprintf(stderr, "FAILED TO READ FROM STDIN");
-				close(sockfd);
-				return errno;
+				if (errno != EAGAIN)
+				{
+					fprintf(stderr, "FAILED TO READ FROM STDIN");
+					close(sockfd);
+					return errno;
+				}
 			}
-			continue;
-		}
-		else
-		{
-			server_buf[stdin_bytes] = '\0'; // Add a null character cause C-strings
-			int did_send = sendto(sockfd, server_buf, stdin_bytes/*strlen(server_buf)*/,
-								  // socket  send data   how much to send
-								  0, (struct sockaddr *)&clientaddr,
-								  // flags   where to send
-								  sizeof(clientaddr));
-
-			if (did_send < 0)
+			else
 			{
-				fprintf(stderr, "ERROR READING FROM STDIN");
-				close(sockfd);
-				return errno;
+				int did_send = sendto(sockfd, server_buf, stdin_bytes /*strlen(server_buf)*/,
+									  // socket  send data   how much to send
+									  0, (struct sockaddr *)&clientaddr,
+									  // flags   where to send
+									  sizeof(clientaddr));
+
+				if (did_send < 0)
+				{
+					fprintf(stderr, "ERROR READING FROM STDIN");
+					close(sockfd);
+					return errno;
+				}
 			}
 		}
 	}

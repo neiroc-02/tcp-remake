@@ -79,17 +79,15 @@ int main(int argc, char *argv[])
 		int stdin_bytes = read(STDIN_FILENO, client_buf, sizeof(client_buf));
 		if (stdin_bytes < 0)
 		{
-			if (errno != EAGAIN && errno != EWOULDBLOCK)
+			if (errno != EAGAIN)
 			{
 				fprintf(stderr, "FAILED TO READ FROM STDIN");
 				close(sockfd);
 				return errno;
 			}
-			continue;
 		}
 		else
 		{
-			// client_buf[stdin_bytes] = '\0';
 			int did_send = sendto(sockfd, client_buf, stdin_bytes /*strlen(client_buf)*/,
 								  // socket  send data   how much to send
 								  0, (struct sockaddr *)&serveraddr,
@@ -115,13 +113,12 @@ int main(int argc, char *argv[])
 		// Error if bytes_recvd < 0 :(
 		if (bytes_recvd < 0)
 		{
-			if (errno != EAGAIN && errno != EWOULDBLOCK)
+			if (errno != EAGAIN)
 			{
 				fprintf(stderr, "ERROR RECIEVING DATA");
 				close(sockfd);
 				return errno;
 			}
-			continue;
 		}
 		else
 		{
