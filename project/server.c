@@ -25,14 +25,15 @@ typedef struct
 } Packet;
 
 /* PERFORM HANDSHAKE SERVER SIDE */
-Packet handshake(int sockfd, struct sockaddr *serveraddr, int *ACK, int *SEQ)
+/* Note: Don't worry about the timer, just assume everything will not drop */
+int handshake(int sockfd, struct sockaddr *serveraddr, int *ACK, int *SEQ)
 {
+	/* Precursor setup... */
 	socklen_t addr_len = sizeof(*serveraddr);
 	Packet retval = {0};
-	time_t start;
-	int bytes_recv = 0;
 	Packet syn = {0};
-	const int RETRANSMIT = 1;
+	int bytes_recv = 0;
+
 	/* 1. Wait to recieve SYN */
 	while (bytes_recv <= 0)
 	{
@@ -44,55 +45,36 @@ Packet handshake(int sockfd, struct sockaddr *serveraddr, int *ACK, int *SEQ)
 			exit(1);
 		}
 	}
-	/* 2. Send the SYN-ACK flag */
+
+	/* Setting all the flags for syn-ack */
 	Packet syn_ack = {0};
-	syn_ack.flags |= 0b11;
+	syn_ack.flags |= 3; // turn on the syn and ack flags
 	syn_ack.seq = htonl(rand() % (__UINT32_MAX__ / 2));
 	syn_ack.ack = htonl(ntohl(syn.seq) + 1);
 
-	struct pollfd pfd;
-	pfd.fd = sockfd;
-	pfd.events = POLLIN;
+	/* 2. Send the SYN-ACK flag */
+	if (sendto(sockfd, &syn_ack, sizeof(syn_ack), 0, serveraddr, addr_len) < 0)
+	{
+		fprintf(stderr, "FAILED SENDING SYN-ACK");
+		close(sockfd);
+		exit(1);
+	}
 
-	start = time(NULL);
+	/* 3. Continue trying to recieve data until you get something with a payload */
 	while (1)
 	{
-		/* Sending the syn-ack flag */
-		fprintf(stdout, "Retransmitting...");
-		fflush(stdout);
-		if (sendto(sockfd, &syn_ack, sizeof(syn_ack), 0, serveraddr, addr_len) < 0)
+		int data = recvfrom(sockfd, &retval, sizeof(retval), 0, serveraddr, &addr_len);
+		if (data < 0 && errno != EAGAIN)
 		{
-			fprintf(stderr, "FAILED SENDING SYN-ACK");
+			fprintf(stderr, "FAILED TO RECV ACK");
 			close(sockfd);
 			exit(1);
 		}
-		/* Waiting for data to exit the loop with*/
-		int poll_count = poll(&pfd, 1, 1000);
-		if (poll_count < 0)
+		else if (data > 0)
 		{
-			fprintf(stderr, "POLL ERROR");
-			close(sockfd);
-			exit(1);
-		}
-		else if (poll_count == 0)
-		{
-			continue;
-		}
-		else
-		{
-			int data = recvfrom(sockfd, &retval, sizeof(retval), 0, serveraddr, &addr_len);
-			if (data < 0 && errno != EAGAIN)
-			{
-				fprintf(stderr, "FAILED TO RECIEVE FIRST DATA PACKET");
-				close(sockfd);
-				exit(1);
-			}
-			else if (data > 0 && retval.payload[0] != '\0')
-			{
-				*ACK = ntohl(retval.ack);
-				*SEQ = ntohl(retval.seq);
-				return retval;
-			}
+			*ACK = ntohl(retval.ack);
+			*SEQ = ntohl(retval.seq);
+			return 1;
 		}
 	}
 }
@@ -167,9 +149,15 @@ int main(int argc, char *argv[])
 	/* CALL HANDSHAKE HERE */
 	int SEQ = 0, ACK = 0;
 	srand(time(NULL));
-	fprintf(stdout, "Entering handshake...");
-	Packet result = handshake(sockfd, (struct sockaddr *)&servaddr, &SEQ, &ACK);
-	fprintf(stdout, "FINISHED HANDSHAKE");
+	//fprintf(stdout, "Entering handshake...\n");
+	int result = handshake(sockfd, (struct sockaddr *)&servaddr, &SEQ, &ACK);
+	if (!result)
+	{
+		fprintf(stderr, "HANDSHAKE FAILED\n");
+		close(sockfd);
+		return result;
+	}
+	//fprintf(stdout, "FINISHED HANDSHAKE: ACK %i, SEQ %d\n", ACK, SEQ);
 
 #ifdef DEBUG
 	/* Looping to check for and send data */

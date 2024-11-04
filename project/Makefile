@@ -1,5 +1,5 @@
 CC=gcc
-CFLAGS= 
+CFLAGS= -Wall -Wextra -Werror -pedantic -std=gnu99 -g -fsanitize=address -Wno-unused-variable -Wno-unused-parameter
 
 all: clean build
 
