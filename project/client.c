@@ -4,8 +4,83 @@
 #include <unistd.h>
 #include <errno.h>
 #include <fcntl.h>	// for non-blocking sockets/stdin
-#include <stdlib.h> // for atoi
-#include <stdio.h>	//for printf
+#include <stdlib.h> // for atoi, rand()
+#include <stdio.h>	// for printf()
+#include <time.h>	// for timer
+#include <math.h>	// for pow()
+#include <poll.h>
+
+// #define DEBUG // for debugging
+#define MSS 1012 // MSS = Maximum Segment Size (aka max length)
+typedef struct
+{
+	uint32_t ack;
+	uint32_t seq;
+	uint16_t length;
+	uint8_t flags;
+	uint8_t unused;
+	uint8_t payload[MSS];
+} Packet;
+
+/* PERFORM HANDSHAKE CLIENT SIDE: */
+int handshake(int sockfd, struct sockaddr *serveraddr, int *ACK, int *SEQ)
+{
+	/* Getting the socklen */
+	socklen_t addr_len = sizeof(*serveraddr);
+
+	/* Initial SYN */
+	Packet syn = {0};
+	syn.flags |= 1;									// set the syn flag
+	syn.seq = htonl(rand() % (__UINT32_MAX__ / 2)); // half of the max sequence number
+
+	/* Initializing Poll*/
+	struct pollfd pfd;
+	pfd.fd = sockfd;
+	pfd.events = POLLIN;
+
+	/* Every 1 seconds, send the packet if no ACK has been recieved*/
+	while (1)
+	{
+		/* 1. Try sending the SYN packet*/
+		if (sendto(sockfd, &syn, sizeof(syn), 0, serveraddr, addr_len) < 0)
+		{
+			fprintf(stderr, "FAILED SENDING OF SYN %s\n", strerror(errno));
+			close(sockfd);
+			return errno;
+		}
+		/* 2. If we successfully sent a packet, check that we recieve a SYN-ACK*/
+		Packet syn_ack = {0};
+		/* Use the poll to track if a second */
+		int poll_count = poll(&pfd, 1, 1000);
+		if (poll_count < 0)
+		{
+			fprintf(stderr, "POLL ERROR!");
+			close(sockfd);
+			return errno;
+		}
+		else if (poll == 0)
+		{
+			continue;
+		}
+		else
+		{
+			int bytes_recv = recvfrom(sockfd, &syn_ack, sizeof(syn_ack), 0, serveraddr, &addr_len);
+			if (bytes_recv < 0 && errno != EAGAIN)
+			{
+				fprintf(stderr, "FAILED RECV OF SYN-ACK %s\n", strerror(errno));
+				close(sockfd);
+				return errno;
+			}
+			else if (bytes_recv > 0)
+			{
+				/* Update the SEQ and ACK numbers for general passing*/
+				*ACK = ntohl(syn_ack.seq) + 1;
+				*SEQ = ntohl(syn_ack.ack) + 1;
+				return 1;
+			}
+		}
+	}
+}
 
 int main(int argc, char *argv[])
 {
@@ -71,20 +146,32 @@ int main(int argc, char *argv[])
 	int SEND_PORT = atoi(argv[2]);
 	serveraddr.sin_port = htons(SEND_PORT); // Big endian
 
+	/* CALL HANDSHAKE HERE */
+	srand(time(NULL));
+	int SEQ = 0, ACK = 0;
+	fprintf(stdout, "Entering handshake...");
+	int result = handshake(sockfd, (struct sockaddr *)&serveraddr, &SEQ, &ACK);
+	if (!result)
+	{
+		fprintf(stderr, "HANDSHAKE FAILED\n");
+		close(sockfd);
+		return result;
+	}
+
+	fprintf(stdout, "Finished Handshake -> SEQ: %i, ACK: %i\n", SEQ, ACK);
+
+#ifdef DEBUG
 	/* Looping to send/recieve the data */
 	while (1)
 	{
 		/* 3. Send data to server */
 		char client_buf[1024];
 		int stdin_bytes = read(STDIN_FILENO, client_buf, sizeof(client_buf));
-		if (stdin_bytes < 0)
+		if (stdin_bytes < 0 && errno != EAGAIN)
 		{
-			if (errno != EAGAIN)
-			{
-				fprintf(stderr, "FAILED TO READ FROM STDIN");
-				close(sockfd);
-				return errno;
-			}
+			fprintf(stderr, "FAILED TO READ FROM STDIN");
+			close(sockfd);
+			return errno;
 		}
 		else
 		{
@@ -126,6 +213,7 @@ int main(int argc, char *argv[])
 			write(1, server_buf, bytes_recvd);
 		}
 	}
+#endif
 	/* 6. You're done! Terminate the connection */
 	close(sockfd);
 	return 0;
