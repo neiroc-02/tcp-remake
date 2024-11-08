@@ -1,10 +1,10 @@
+#pragma once
 #include <vector>
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
-#include <fcntl.h>	 //for non-blocking sockets
 #include <stdlib.h>	 //for atoi
 #include <stdio.h>	 //for fprintf
 #include <vector>	 //for std::vector
@@ -24,12 +24,9 @@ typedef struct
 } Packet;
 
 bool operator<(const Packet&a, const Packet &b);        //for comparing packets
-void print_diag(Packet *pkt, int diag);   //for printing packets
-void serialize(Packet &pkt);
-void deserialize(Packet &pkt);
-/* TODO: Work on later...
-vector<Packet> clean_send_buffer(int ACK, vector<Packet> send_buffer);
-vector<Packet> clean_recv_buffer(int ACK, vector<Packet> recv_buffer);
-void handle_ack(int ACK, int ack_count, vector<Packet> send_buffer);
-void handle_data(int ACK, vector<Packet> recv_buffer);
-*/
+void print_diag(Packet *pkt, int diag);   				//for printing packets
+void serialize(Packet &pkt);							//for changing packets to network order
+void deserialize(Packet &pkt);							//for changing packets to host order
+void clean_send_buffer(uint32_t ACK, vector<Packet> &send_buffer); //
+void clean_recv_buffer(uint32_t &ACK, vector<Packet> &recv_buffer);
+void handle_ack(uint32_t &ack_count, const Packet &pkt, vector<Packet> &send_buffer);

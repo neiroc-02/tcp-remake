@@ -5,3 +5,4 @@ project/*.out
 project/project
 results
 .vscode
+project/*.o

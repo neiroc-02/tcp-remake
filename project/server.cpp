@@ -29,7 +29,7 @@ prolly shoulda done development on client side first rip
 
 /* PERFORM HANDSHAKE SERVER SIDE */
 /* Note: Don't worry about the timer, just assume everything will not drop */
-int handshake(int sockfd, struct sockaddr *serveraddr, int *ACK, int *SEQ)
+Packet handshake(int sockfd, struct sockaddr *serveraddr, uint32_t *ACK, uint32_t *SEQ)
 {
 	/* Precursor setup... */
 	socklen_t addr_len = sizeof(*serveraddr);
@@ -52,7 +52,7 @@ int handshake(int sockfd, struct sockaddr *serveraddr, int *ACK, int *SEQ)
 	/* Setting all the flags for syn-ack */
 	Packet syn_ack = {0};
 	syn_ack.flags = htonl(syn_ack.flags | 3); // turn on the syn and ack flags
-	syn_ack.seq = htonl(rand() % (__UINT32_MAX__ / 2));
+	syn_ack.seq = htonl(rand() % 1000);
 	syn_ack.ack = htonl(ntohl(syn.seq) + 1);
 
 	/* 2. Send the SYN-ACK flag */
@@ -75,9 +75,10 @@ int handshake(int sockfd, struct sockaddr *serveraddr, int *ACK, int *SEQ)
 		}
 		else if (data > 0)
 		{
-			*ACK = ntohl(retval.ack);
-			*SEQ = ntohl(retval.seq);
-			return 1;
+			deserialize(retval);
+			*ACK = retval.ack;
+			*SEQ = retval.seq;
+			return retval;
 		}
 	}
 }
@@ -136,7 +137,6 @@ int main(int argc, char *argv[])
 	struct sockaddr_in servaddr;
 	servaddr.sin_family = AF_INET;		   // use IPv4
 	servaddr.sin_addr.s_addr = INADDR_ANY; // accept all connections; same as inet_addr("0.0.0.0"); "Address string to network bytes"
-
 	int PORT = atoi(argv[1]);		 // Set recieving port
 	servaddr.sin_port = htons(PORT); // Big endian
 
@@ -150,29 +150,32 @@ int main(int argc, char *argv[])
 	}
 
 	/* CALL HANDSHAKE HERE */
-	int SEQ = 0, ACK = 0;
+	uint32_t SEQ = 0, ACK = 0;
 	srand(time(NULL));
-	int result = handshake(sockfd, (struct sockaddr *)&servaddr, &ACK, &SEQ);
-	if (!result)
-	{
-		fprintf(stderr, "HANDSHAKE FAILED\n");
-		close(sockfd);
-		return result;
-	}
+	Packet result = handshake(sockfd, (struct sockaddr *)&servaddr, &ACK, &SEQ);	
 	fprintf(stdout, "FINISHED HANDSHAKE: ACK %i, SEQ %d\n", ACK, SEQ);
 
 	/* Setting up some constants for the loop */
-	int ack_count = 0;
+	uint32_t ack_count = 0;
 	vector<Packet> recv_buffer;
 	vector<Packet> send_buffer;
-	auto last_time = std::chrono::steady_clock::now();
 
+	/* If the returned packet contained data, place in recv_buffer */
+	/* FIXME: HANDLE DATA IN HANDSHAKE*/
+	#ifdef FIXME
+	if (result.length > 0){
+		recv_buffer.push_back(result);
+		/* Send back the proper ACK */
+	}
+	#endif
+	auto last_time = std::chrono::steady_clock::now();
 	while (1)
 	{
 		/* 1. Handle incoming data from stdin */
 		uint8_t payload[MSS];
 		struct sockaddr_in clientaddr;
 		socklen_t clientsize = sizeof(clientaddr);
+		/* NOTE: Don't worry about splitting the stdin buffer, the OS does that for you if you have extra bytes */
 		int stdin_bytes = read(STDIN_FILENO, payload, sizeof(payload));
 		if (stdin_bytes < 0 && errno != EAGAIN)
 		{
@@ -185,20 +188,30 @@ int main(int argc, char *argv[])
 			/* If we recieve data, send the packet*/
 			Packet pkt = {0};
 			pkt.length = stdin_bytes;				   // length is given by the number of bytes read
-			pkt.seq = SEQ + stdin_bytes;			   // new seq number is SEQ + stdin_bytes
+			pkt.seq = SEQ;			   // new seq number is SEQ + stdin_bytes
+			SEQ = pkt.seq + pkt.length;
 			memcpy(pkt.payload, payload, stdin_bytes);
+			/* Check if we have seen the packet before */
+			auto it = find_if(send_buffer.begin(), send_buffer.end(), [&](const Packet &temp){
+							return pkt.seq == temp.seq;
+			});
+			bool new_pkt = (it == send_buffer.end());
 			serialize(pkt);
 			print_diag(&pkt, SEND);
-			printf("Packet length: %i", pkt.length);
-			if (sendto(sockfd, &pkt, sizeof(Packet), 0, 
-						(struct sockaddr *)&servaddr, sizeof(servaddr)) < 0)
+			/* If the packet hasn't been seen send it */
+			if (new_pkt && sendto(sockfd, &pkt, sizeof(Packet), 0, (struct sockaddr *)&servaddr, sizeof(servaddr)) < 0)
 			{
 				fprintf(stderr, "FAILED TO SEND DATA PACKET: %s\n", strerror(errno));
 				close(sockfd);
 				return errno;
 			}
+			/* Add the new packet to the send buffer */
+			if (new_pkt){
+				deserialize(pkt);
+				send_buffer.push_back(pkt);
+			}
 		}
-		/* 2. Read data in and print it*/
+		/* 2. Handle incoming data from socket */
 		Packet client_pkt = {0};
 		int client_bytes = recvfrom(sockfd, &client_pkt, sizeof(client_pkt), 0, (struct sockaddr *)&clientaddr, &clientsize);
 		if (client_bytes < 0 && errno != EAGAIN)
@@ -209,8 +222,40 @@ int main(int argc, char *argv[])
 		}
 		else if (client_bytes > 0)
 		{
+		#ifdef COMMENT
 			print_diag(&client_pkt, RECV);
 			deserialize(client_pkt);
+			write(1, client_pkt.payload, client_pkt.length);
+		#endif
+			/* Deserialize the packet and check if its an ACK */
+			print_diag(&client_pkt, RECV);
+			deserialize(client_pkt);
+			bool is_ack = (client_pkt.flags & 2);
+			if (is_ack){
+				/* If we have an ACK, call handle ACK*/
+				handle_ack(ack_count, client_pkt, send_buffer);
+			}
+			if (client_pkt.length > 0) {
+				/* If we have a data packet, first check if we've seen it before */
+				auto it = find_if(recv_buffer.begin(), recv_buffer.end(), [&](const Packet &temp){ 
+					return temp.seq == client_pkt.seq; 
+				});
+				/* If its not a duplicate, call handle data*/
+				if (it == recv_buffer.end()){
+					recv_buffer.push_back(client_pkt);
+					clean_recv_buffer(ACK, recv_buffer);
+				}
+				/* Send an ACK */
+				Packet pkt = {0};
+				pkt.flags |= 2;
+				pkt.ack = ACK;
+				serialize(pkt);
+				if (sendto(sockfd, &pkt, sizeof(Packet), 0, (struct sockaddr *)&servaddr, sizeof(servaddr)) < 0){
+					fprintf(stderr, "FAILED TO SEND ACK: %s\n", strerror(errno));
+					close(sockfd);
+					return errno;
+				}
+			}
 		}
 	}
 	#ifdef OLDCODE
