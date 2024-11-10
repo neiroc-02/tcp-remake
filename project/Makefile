@@ -1,5 +1,5 @@
 CC=g++
-CFLAGS= 
+CFLAGS=
 
 all: clean build
 
@@ -22,7 +22,7 @@ clean:
 	rm -rf server client *.o *.bin *.out *.dSYM
 
 zip: clean
-	rm -f project0.zip
+	rm -f project1.zip
 	mkdir -p project
-	cp server.cpp client.cpp packet_utils.h Makefile project
-	zip project0.zip project/*
+	cp server.cpp client.cpp Makefile project
+	zip project1.zip project/*

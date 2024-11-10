@@ -79,13 +79,17 @@ void deserialize(Packet &pkt){
 
 void clean_send_buffer(uint32_t ACK, vector<Packet> &send_buffer){
 	/* Iterate through the send buffer to delete any element less than the ACK number */
-	while (send_buffer.size() != 0 && send_buffer.at(0).seq < ACK){
+	while (send_buffer.size() > 0 && send_buffer.at(0).seq < ACK){
 		send_buffer.erase(send_buffer.begin());
 	}
 }
 
 void handle_ack(uint32_t &ack_count, const Packet &pkt, vector<Packet> &send_buffer){
+	if (send_buffer.empty()) return;
 	/* If we have duplicate acks, update the counter */
+	// sort(send_buffer.begin(), send_buffer.end());
+	// 120 130
+
 	uint32_t expected_ack = send_buffer.at(0).seq; //the lowest seq number you haven't recieved an ack for is at the top of send_buffer
 	if (pkt.ack == expected_ack){
 		ack_count++;
@@ -101,15 +105,15 @@ void clean_recv_buffer(uint32_t &ACK, vector<Packet> &recv_buffer){
 	/* Sort the recv buffer before you attempt to clean up */
 	sort(recv_buffer.begin(), recv_buffer.end());
 	/* Check if you can print/delete elements if the seq/ack numbers are aligned */
-	while (recv_buffer.size() > 1 && recv_buffer.at(0).seq == ACK){
+	while (!recv_buffer.empty() && recv_buffer.at(0).seq <= ACK){
 		write(1, recv_buffer.at(0).payload, recv_buffer.at(0).length);
-		ACK += recv_buffer.at(1).length;
+		if (recv_buffer.at(0).seq == ACK){
+			ACK += recv_buffer.at(0).length;
+		}
 		recv_buffer.erase(recv_buffer.begin());
 	}
-	/* Edge case, handle the singleton element */
-	if (recv_buffer.size() == 1 && recv_buffer.at(0).seq == ACK){
-		write(1, recv_buffer.at(0).payload, recv_buffer.at(0).length);
-		ACK += recv_buffer.at(0).length;
-		recv_buffer.erase(recv_buffer.begin());
-	}
+	/* consider breaking? */
+
+	// 120 125 130 140
+	// ACK 130
 }

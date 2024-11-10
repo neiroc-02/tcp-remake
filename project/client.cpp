@@ -8,10 +8,13 @@
 #include <stdio.h>	// for fprintf()
 #include <algorithm>
 #include <chrono>
-#include <vector>   // for buffers
+#include <vector> // for buffers
 #include <string>
 #include "packet_utils.h"
 using namespace std;
+
+#define DEBUG
+//#define DROP
 
 /* Defining some necessary constants */
 #define RECV 0
@@ -28,10 +31,12 @@ bool handshake(int sockfd, struct sockaddr *serveraddr, uint32_t *ACK, uint32_t 
 	socklen_t addr_len = sizeof(*serveraddr);
 	/* Initial SYN */
 	Packet syn = {0};
-	syn.flags |= 1;									// set the syn flag
+	syn.flags |= 1;			 // set the syn flag
 	syn.seq = rand() % 1000; // half of the max sequence number
 	serialize(syn);
-
+	#ifdef DEBUG
+	print_diag(&syn, SEND);
+	#endif
 	/* 1. Try sending the SYN packet*/
 	if (sendto(sockfd, &syn, sizeof(syn), 0, serveraddr, addr_len) < 0)
 	{
@@ -53,24 +58,28 @@ bool handshake(int sockfd, struct sockaddr *serveraddr, uint32_t *ACK, uint32_t 
 		else if (bytes_recv > 0)
 		{
 			/* Update the SEQ and ACK numbers for general passing*/
+			#ifdef DEBUG
+			print_diag(&syn_ack, RECV);
+			#endif
 			deserialize(syn_ack);
 			*ACK = syn_ack.seq + 1;
 			*SEQ = syn_ack.ack;
 
 			/* 3. Send the final ACK */
 			Packet pkt = {0};
-			pkt.ack = *ACK;
 			pkt.seq = *SEQ;
-			pkt.flags |= 2; 
+			pkt.ack = *ACK;
+			pkt.flags |= 2;
 			serialize(pkt);
-			if (sendto(sockfd, &pkt, sizeof(pkt), 0, serveraddr, addr_len) < 0){
+			#ifdef DEBUG	
+			print_diag(&pkt, SEND);
+			#endif
+			if (sendto(sockfd, &pkt, sizeof(pkt), 0, serveraddr, addr_len) < 0)
+			{
 				fprintf(stderr, "FAILED SENDING ACK\n");
 				close(sockfd);
 				return errno;
 			}
-			int temp = *ACK;
-			*ACK = *SEQ;
-			*SEQ = temp;
 			return true;
 		}
 	}
@@ -151,26 +160,28 @@ int main(int argc, char *argv[])
 		close(sockfd);
 		return result;
 	}
-	fprintf(stdout, "Finished Handshake -> ACK: %i, SEQ %i\n", ACK, SEQ);
-
+#ifdef DEBUG
+	fprintf(stderr, "FINISHED HANDSHAKE-> ACK: %i, SEQ %i\n", ACK, SEQ);
+#endif
 	/* Setting up some constants for the loop */
-	uint32_t expected_ack = ACK;
 	uint32_t ack_count = 0;
 	vector<Packet> send_buffer;
 	vector<Packet> recv_buffer;
 	auto last_time = std::chrono::steady_clock::now();
-
-	while (1){
+	while (1)
+	{
 		/* 1. Handle incoming data from stdin */
 		uint8_t payload[MSS];
 		/* NOTE: Don't worry about splitting the stdin buffer, the OS does that for you if you have extra bytes */
 		int stdin_bytes = read(STDIN_FILENO, payload, sizeof(payload));
-		if (stdin_bytes < 0 && errno != EAGAIN){
+		if (stdin_bytes < 0 && errno != EAGAIN)
+		{
 			fprintf(stderr, "FAILED TO READ FROM STDIN: %s\n", strerror(errno));
 			close(sockfd);
 			return errno;
 		}
-		else if (stdin_bytes > 0){
+		else if (stdin_bytes > 0)
+		{
 			/* Initialize a new packet to send */
 			Packet pkt = {0};
 			pkt.length = stdin_bytes;
@@ -178,20 +189,27 @@ int main(int argc, char *argv[])
 			SEQ = pkt.seq + pkt.length;
 			memcpy(pkt.payload, payload, stdin_bytes);
 			/* Check if we have seen the packet before */
-			auto it = find_if(send_buffer.begin(), send_buffer.end(), [&](const Packet &temp){
-							return pkt.seq == temp.seq;
-			});
+			auto it = find_if(send_buffer.begin(), send_buffer.end(), [&](const Packet &temp)
+							  { return pkt.seq == temp.seq; });
 			bool new_pkt = (it == send_buffer.end());
+			bool DROP_SIM = true;
 			serialize(pkt);
+#ifdef DEBUG
 			print_diag(&pkt, SEND);
+#endif
+#ifdef DROP
+			DROP_SIM = (rand() % 100) > 10;
+#endif
 			/* If the packet hasn't been seen, send it*/
-			if (new_pkt && sendto(sockfd, &pkt, sizeof(Packet), 0, (struct sockaddr *)&serveraddr, sizeof(serveraddr)) < 0){
+			if (DROP_SIM && new_pkt && sendto(sockfd, &pkt, sizeof(Packet), 0, (struct sockaddr *)&serveraddr, sizeof(serveraddr)) < 0)
+			{
 				fprintf(stderr, "FAILED TO SEND PACKET %s\n", strerror(errno));
 				close(sockfd);
 				return errno;
 			}
 			/* Add the new packet to the send buffer */
-			if (new_pkt){
+			if (new_pkt)
+			{
 				deserialize(pkt);
 				send_buffer.push_back(pkt);
 			}
@@ -205,98 +223,96 @@ int main(int argc, char *argv[])
 			close(sockfd);
 			return errno;
 		}
-		else if (server_bytes > 0){
-			#ifdef OLDCODE 
+		else if (server_bytes > 0)
+		{
+		/* Deserialize the packet and check if its an ACK */
+#ifdef DEBUG
 			print_diag(&server_pkt, RECV);
-			deserialize(server_pkt);
-			write(1, server_pkt.payload, server_pkt.length);
-			/* FIXME: FIGURE OUT WHY THIS FAILS TO RECIEVE BELOW */
-			#endif
-			/* Deserialize the packet and check if its an ACK */
-			print_diag(&server_pkt, RECV);
+#endif
 			deserialize(server_pkt);
 			bool is_ack = (server_pkt.flags & 2);
-			if (is_ack){
+			if (is_ack)
+			{
 				/* If we have an ACK, call handle ACK */
 				handle_ack(ack_count, server_pkt, send_buffer);
 			}
-			if (server_pkt.length > 0) {
+			if (server_pkt.length > 0)
+			{
+#ifdef DEBUG
+					fprintf(stderr, "ACK: %d\n", ACK);
+#endif
 				/* If we have a data packet, first check that its not a duplicate*/
-				auto it = find_if(recv_buffer.begin(), recv_buffer.end(), [&](const Packet &temp){ 
-					return temp.seq == server_pkt.seq; 
-				});
+				auto it = find_if(recv_buffer.begin(), recv_buffer.end(), [&](const Packet &temp)
+								  { return temp.seq == server_pkt.seq; });
 				/* If its not a duplicate, call handle data*/
-				if (it == recv_buffer.end()){
+				if (server_pkt.seq >= ACK && it == recv_buffer.end())
+				{
 					recv_buffer.push_back(server_pkt);
-					clean_recv_buffer(ACK, recv_buffer);
 				}
+				clean_recv_buffer(ACK, recv_buffer);
 				/* Send an ACK*/
 				Packet pkt = {0};
 				pkt.flags |= 2;
 				pkt.ack = ACK;
 				serialize(pkt);
-				if (sendto(sockfd, &pkt, sizeof(pkt), 0, (struct sockaddr *)&serveraddr, sizeof(serveraddr)) < 0){
+				bool DROP_SIM = true;
+#ifdef DROP
+				DROP_SIM = (rand() % 100) > 10;
+#endif
+				if (DROP_SIM && sendto(sockfd, &pkt, sizeof(Packet), 0, (struct sockaddr *)&serveraddr, sizeof(serveraddr)) < 0)
+				{
 					fprintf(stderr, "FAILED TO SEND ACK: %s", strerror(errno));
 					close(sockfd);
 					return errno;
-				}		
+				}
+			}
+		}
+		/* 3. Handle retransmission logic */
+		auto current_time = std::chrono::steady_clock::now();
+		if (send_buffer.size() == 0)
+		{
+			last_time = current_time;
+		}
+		auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(current_time - last_time).count();
+		/* 3. Handle retransmission: send a packet when the timer goes off; reset the timer when the send_buf is empty */
+		if (ack_count >= 3 || elapsed >= 1000)
+		{
+#ifdef DEBUG
+			//fprintf(stderr, "RETRANSMITING...\n");
+#endif
+			/* Resend what is at the top of the sending buffer */
+			if (!send_buffer.empty())
+			{
+				Packet retransmit = send_buffer.at(0);
+				serialize(retransmit);
+				bool DROP_SIM = true;
+#ifdef DEBUG
+				fprintf(stderr, "ACK: %d\n", ACK);
+				fprintf(stderr, "SEQ: %d\n", SEQ);
+				fprintf(stderr, "ELAPSED: %ld\n", elapsed);
+				fprintf(stderr, "ACK COUNT: %d\n", ack_count);
+				print_diag(&retransmit, RTOS);
+#endif
+#ifdef DROP
+				DROP_SIM = (rand() % 100) > 10;
+#endif
+				if (DROP_SIM && sendto(sockfd, &retransmit, sizeof(Packet), 0, (struct sockaddr *)&serveraddr, sizeof(serveraddr)) < 0)
+				{
+					fprintf(stderr, "FAILED TO SEND RETRANSMISSION: %s\n", strerror(errno));
+					close(sockfd);
+					return errno;
+				}
+			}
+			if (ack_count >= 3)
+			{
+				ack_count = 0;
+			}
+			if (elapsed >= 1000)
+			{
+				last_time = current_time;
 			}
 		}
 	}
-	#ifdef OLDCODE
-	/* Looping to send/recieve the data */
-	while (1)
-	{
-		/* 3. Send data to server */
-		char client_buf[1024];
-		int stdin_bytes = read(STDIN_FILENO, client_buf, sizeof(client_buf));
-		if (stdin_bytes < 0 && errno != EAGAIN)
-		{
-			fprintf(stderr, "FAILED TO READ FROM STDIN");
-			close(sockfd);
-			return errno;
-		}
-		else
-		{
-			int did_send = sendto(sockfd, client_buf, stdin_bytes /*strlen(client_buf)*/,
-								  // socket  send data   how much to send
-								  0, (struct sockaddr *)&serveraddr,
-								  // flags   where to send
-								  sizeof(serveraddr));
-			if (did_send < 0)
-			{
-				fprintf(stderr, "ERROR SENDING DATA: %s", strerror(errno));
-				close(sockfd);
-				return errno;
-			}
-		}
-		/* 4. Create buffer to store incoming data */
-		int BUF_SIZE = 1024;
-		char server_buf[BUF_SIZE];
-		socklen_t serversize = sizeof(socklen_t); // Temp buffer for recvfrom API
-		/* 5. Listen for response from server */
-		int bytes_recvd = recvfrom(sockfd, server_buf, BUF_SIZE,
-								   // socket  store data  how much
-								   0, (struct sockaddr *)&serveraddr,
-								   &serversize);
-		// Execution will stop here until `BUF_SIZE` is read or termination/error
-		// Error if bytes_recvd < 0 :(
-		if (bytes_recvd < 0)
-		{
-			if (errno != EAGAIN)
-			{
-				fprintf(stderr, "ERROR RECIEVING DATA");
-				close(sockfd);
-				return errno;
-			}
-		}
-		else
-		{
-			// Print out data
-			write(1, server_buf, bytes_recvd);
-		}
-	}
-	#endif
 	/* 6. You're done! Terminate the connection */
 	close(sockfd);
 	return 0;
