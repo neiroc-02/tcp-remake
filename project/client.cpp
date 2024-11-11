@@ -242,11 +242,9 @@ int main(int argc, char *argv[])
 				ACK = (server_pkt.ack == ACK) ? (server_pkt.ack + server_pkt.length) : ACK;
 				clean_recv_buffer(ACK, recv_buffer);
 				/* Send an ACK*/
-				//clean_send_buffer(ACK, send_buffer);
 				Packet pkt = {0};
 				pkt.flags |= 2;
 				pkt.ack = ACK;
-				//ACK = pkt.ack;
 				serialize(pkt);
 				bool DROP_SIM = true;
 #ifdef DROP
@@ -262,7 +260,7 @@ int main(int argc, char *argv[])
 			if (is_ack)
 			{
 				/* If we have an ACK, call handle ACK */
-				handle_ack(ACK ,ack_count, server_pkt, send_buffer);
+				handle_ack(ACK, ack_count, server_pkt, send_buffer);
 			}
 		}
 		/* 3. Handle retransmission logic */
@@ -297,16 +295,12 @@ int main(int argc, char *argv[])
 			/* Resend what is at the top of the sending buffer */
 			if (!send_buffer.empty())
 			{
-				//clean_send_buffer(ACK, send_buffer);
 				Packet retransmit = send_buffer.at(0);
-				//retransmit.ack = ACK;
 				serialize(retransmit);
 				bool DROP_SIM = true;
 #ifdef DEBUG
 				fprintf(stderr, "ACK: %d\n", ACK);
 				fprintf(stderr, "SEQ: %d\n", SEQ);
-				fprintf(stderr, "ELAPSED: %ld\n", elapsed);
-				fprintf(stderr, "ACK COUNT: %d\n", ack_count);
 				for (int i = 0; i < send_buffer.size(); i++){
 					fprintf(stderr, "%d ", send_buffer.at(i).seq);
 				}

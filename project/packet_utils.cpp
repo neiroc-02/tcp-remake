@@ -87,6 +87,9 @@ void clean_send_buffer(uint32_t ACK, vector<Packet> &send_buffer){
 void handle_ack(uint32_t &ACK, uint32_t &ack_count, const Packet &pkt, vector<Packet> &send_buffer){
 	if (send_buffer.empty()) return;
 	/* If we have duplicate acks, update the counter */
+	fprintf(stderr, "IN HANDLE ACK...\n");
+	fprintf(stderr, "ACK: %d\n", ACK);
+	fprintf(stderr, "PKT_ACK: %d\n", pkt.ack);
 	uint32_t expected_ack = send_buffer.at(0).seq; //the lowest seq number you haven't recieved an ack for is at the top of send_buffer
 	if (pkt.ack == expected_ack){
 		ack_count++;

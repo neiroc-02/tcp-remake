@@ -14,10 +14,14 @@ The retransmission part was responsible for retransmitting packets that were not
 Some of the problems I had included not properly converting between endianness.
 I initially converted the length using `htonl()` and `ntohl()` but I was not able to properly convert the length of the packet.
 This was because I was treating it as a long instead of a short, which ended up 0ing out the length value.
+I also had issues with the handshake not properly working.
+I corrected this by returning the correct ACK based on data being sent by the client.
+If the data was sent with the ACK, I would increment ACK by the length, otherwise I would increment by 1.
 I have also had problems with looping when handling duplicate packets.
 Sometimes my code would continue retransmitting and not resend the needed ACK to break the infinite loop.
 I have continued to try to fix this issue but it is still present in my code.
 I have been debugging my recieve function and believe it has issues when the ACK gets behind the expected sequence number.
+
 
 
 

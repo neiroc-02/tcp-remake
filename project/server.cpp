@@ -261,7 +261,6 @@ int main(int argc, char *argv[])
 				ACK = (client_pkt.ack == ACK) ? (client_pkt.ack + client_pkt.length) : ACK;
 				clean_recv_buffer(ACK, recv_buffer);
 				/* Send an ACK */
-				//clean_send_buffer(ACK, send_buffer);
 				Packet pkt = {0};
 				pkt.flags |= 2;
 				pkt.ack = ACK;
@@ -316,13 +315,13 @@ int main(int argc, char *argv[])
 			{
 				//clean_send_buffer(ACK, send_buffer);
 				Packet retransmit = send_buffer.at(0);
+				fprintf(stderr, "Retransmitting Packet while ACK is: %d\n", ACK);
 				serialize(retransmit);
+				print_diag(&retransmit, RTOS);
 				bool DROP_SIM = true;
 			#ifdef DEBUG
 				fprintf(stderr, "ACK: %d\n", ACK);
 				fprintf(stderr, "SEQ: %d\n", SEQ);
-				fprintf(stderr, "ELAPSED: %ld\n", elapsed);
-				fprintf(stderr, "ACK_COUNT: %d\n", ack_count);
 				print_diag(&retransmit, RTOS);
 			#endif
 			#ifdef DROP
