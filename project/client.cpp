@@ -42,7 +42,7 @@ bool handshake(int sockfd, struct sockaddr *serveraddr, uint32_t *ACK, uint32_t 
 	{
 		fprintf(stderr, "FAILED SENDING OF SYN %s\n", strerror(errno));
 		close(sockfd);
-		return errno;
+		return false;
 	}
 	/* 2. If we successfully sent a packet, check that we recieve a SYN-ACK*/
 	Packet syn_ack = {0};
@@ -53,7 +53,7 @@ bool handshake(int sockfd, struct sockaddr *serveraddr, uint32_t *ACK, uint32_t 
 		{
 			fprintf(stderr, "FAILED RECV OF SYN-ACK %s\n", strerror(errno));
 			close(sockfd);
-			return errno;
+			return false;
 		}
 		else if (bytes_recv > 0)
 		{
@@ -78,8 +78,9 @@ bool handshake(int sockfd, struct sockaddr *serveraddr, uint32_t *ACK, uint32_t 
 			{
 				fprintf(stderr, "FAILED SENDING ACK\n");
 				close(sockfd);
-				return errno;
+				return false;
 			}
+			*SEQ += 1;
 			return true;
 		}
 	}
@@ -189,9 +190,6 @@ int main(int argc, char *argv[])
 			SEQ = pkt.seq + pkt.length;
 			memcpy(pkt.payload, payload, stdin_bytes);
 			/* Check if we have seen the packet before */
-			auto it = find_if(send_buffer.begin(), send_buffer.end(), [&](const Packet &temp)
-							  { return pkt.seq == temp.seq; });
-			bool new_pkt = (it == send_buffer.end());
 			bool DROP_SIM = true;
 			serialize(pkt);
 #ifdef DEBUG
@@ -200,19 +198,16 @@ int main(int argc, char *argv[])
 #ifdef DROP
 			DROP_SIM = (rand() % 100) > 10;
 #endif
-			/* If the packet hasn't been seen, send it*/
-			if (DROP_SIM && new_pkt && sendto(sockfd, &pkt, sizeof(Packet), 0, (struct sockaddr *)&serveraddr, sizeof(serveraddr)) < 0)
+			/* Send the new packet */
+			if (DROP_SIM && sendto(sockfd, &pkt, sizeof(Packet), 0, (struct sockaddr *)&serveraddr, sizeof(serveraddr)) < 0)
 			{
 				fprintf(stderr, "FAILED TO SEND PACKET %s\n", strerror(errno));
 				close(sockfd);
 				return errno;
 			}
 			/* Add the new packet to the send buffer */
-			if (new_pkt)
-			{
-				deserialize(pkt);
-				send_buffer.push_back(pkt);
-			}
+			deserialize(pkt);
+			send_buffer.push_back(pkt);
 		}
 		/* 2. Handle incoming data from socket*/
 		Packet server_pkt = {0};
@@ -231,11 +226,6 @@ int main(int argc, char *argv[])
 #endif
 			deserialize(server_pkt);
 			bool is_ack = (server_pkt.flags & 2);
-			if (is_ack)
-			{
-				/* If we have an ACK, call handle ACK */
-				handle_ack(ack_count, server_pkt, send_buffer);
-			}
 			if (server_pkt.length > 0)
 			{
 #ifdef DEBUG
@@ -249,11 +239,14 @@ int main(int argc, char *argv[])
 				{
 					recv_buffer.push_back(server_pkt);
 				}
+				ACK = (server_pkt.ack == ACK) ? (server_pkt.ack + server_pkt.length) : ACK;
 				clean_recv_buffer(ACK, recv_buffer);
 				/* Send an ACK*/
+				//clean_send_buffer(ACK, send_buffer);
 				Packet pkt = {0};
 				pkt.flags |= 2;
 				pkt.ack = ACK;
+				//ACK = pkt.ack;
 				serialize(pkt);
 				bool DROP_SIM = true;
 #ifdef DROP
@@ -265,6 +258,11 @@ int main(int argc, char *argv[])
 					close(sockfd);
 					return errno;
 				}
+			}
+			if (is_ack)
+			{
+				/* If we have an ACK, call handle ACK */
+				handle_ack(ACK ,ack_count, server_pkt, send_buffer);
 			}
 		}
 		/* 3. Handle retransmission logic */
@@ -278,12 +276,30 @@ int main(int argc, char *argv[])
 		if (ack_count >= 3 || elapsed >= 1000)
 		{
 #ifdef DEBUG
-			//fprintf(stderr, "RETRANSMITING...\n");
+			fprintf(stderr, "RETRANSMITING...\n");
 #endif
+			if (ack_count >= 3)
+			{
+				/* Reset the ack counter */
+				ack_count = 0;
+				#ifdef DEBUG
+					fprintf(stderr, "Resetting the ack count...\n");
+				#endif 
+			}
+			if (elapsed >= 1000)
+			{
+				/* Reset the timer */
+				last_time = current_time;
+				#ifdef DEBUG
+					fprintf(stderr, "Resetting the timer...\n");
+				#endif 
+			}
 			/* Resend what is at the top of the sending buffer */
 			if (!send_buffer.empty())
 			{
+				//clean_send_buffer(ACK, send_buffer);
 				Packet retransmit = send_buffer.at(0);
+				//retransmit.ack = ACK;
 				serialize(retransmit);
 				bool DROP_SIM = true;
 #ifdef DEBUG
@@ -291,6 +307,10 @@ int main(int argc, char *argv[])
 				fprintf(stderr, "SEQ: %d\n", SEQ);
 				fprintf(stderr, "ELAPSED: %ld\n", elapsed);
 				fprintf(stderr, "ACK COUNT: %d\n", ack_count);
+				for (int i = 0; i < send_buffer.size(); i++){
+					fprintf(stderr, "%d ", send_buffer.at(i).seq);
+				}
+				fprintf(stderr, "\n");
 				print_diag(&retransmit, RTOS);
 #endif
 #ifdef DROP
@@ -302,14 +322,6 @@ int main(int argc, char *argv[])
 					close(sockfd);
 					return errno;
 				}
-			}
-			if (ack_count >= 3)
-			{
-				ack_count = 0;
-			}
-			if (elapsed >= 1000)
-			{
-				last_time = current_time;
 			}
 		}
 	}

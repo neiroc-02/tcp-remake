@@ -154,7 +154,6 @@ int main(int argc, char *argv[])
 	uint32_t SEQ = 0, ACK = 0;
 	srand(time(NULL));
 	Packet result = handshake(sockfd, (struct sockaddr *)&servaddr, &ACK, &SEQ);
-
 	/* Setting up some constants for the loop */
 	uint32_t ack_count = 0;
 	vector<Packet> recv_buffer;
@@ -178,6 +177,9 @@ int main(int argc, char *argv[])
 			close(sockfd);
 			return errno;
 		}
+	}
+	else {
+		ACK++;
 	}
 
 	auto last_time = std::chrono::steady_clock::now();
@@ -207,28 +209,24 @@ int main(int argc, char *argv[])
 			SEQ = pkt.seq + pkt.length;
 			memcpy(pkt.payload, payload, stdin_bytes);
 			/* Check if we have seen the packet before */
-			auto it = find_if(send_buffer.begin(), send_buffer.end(), [&](const Packet &temp)
-							  { return pkt.seq == temp.seq; });
-			bool new_pkt = (it == send_buffer.end());
 			bool DROP_SIM = true;
 			serialize(pkt);
 			#ifdef DEBUG
 				print_diag(&pkt, SEND);
-				//DROP_SIM = (rand() % 100) > 10;
+			#endif
+			#ifdef DROP
+				DROP_SIM = (rand() % 100) > 10;
 			#endif
 			/* If the packet hasn't been seen, send it */
-			if (DROP_SIM && new_pkt && sendto(sockfd, &pkt, sizeof(Packet), 0, (struct sockaddr *)&servaddr, sizeof(servaddr)) < 0)
+			if (DROP_SIM && sendto(sockfd, &pkt, sizeof(Packet), 0, (struct sockaddr *)&servaddr, sizeof(servaddr)) < 0)
 			{
 				fprintf(stderr, "FAILED TO SEND DATA PACKET: %s\n", strerror(errno));
 				close(sockfd);
 				return errno;
 			}
 			/* Add the new packet to the send buffer */
-			if (new_pkt)
-			{
-				deserialize(pkt);
-				send_buffer.push_back(pkt);
-			}
+			deserialize(pkt);
+			send_buffer.push_back(pkt);
 		}
 		/* 2. Handle incoming data from socket */
 		Packet client_pkt = {0};
@@ -247,11 +245,6 @@ int main(int argc, char *argv[])
 			#endif
 			deserialize(client_pkt);
 			bool is_ack = (client_pkt.flags & 2);
-			if (is_ack)
-			{
-				/* If we have an ACK, call handle ACK*/
-				handle_ack(ack_count, client_pkt, send_buffer);
-			}
 			if (client_pkt.length > 0)
 			{
 				#ifdef DEBUG
@@ -265,15 +258,17 @@ int main(int argc, char *argv[])
 				{
 					recv_buffer.push_back(client_pkt);
 				}
+				ACK = (client_pkt.ack == ACK) ? (client_pkt.ack + client_pkt.length) : ACK;
 				clean_recv_buffer(ACK, recv_buffer);
 				/* Send an ACK */
+				//clean_send_buffer(ACK, send_buffer);
 				Packet pkt = {0};
 				pkt.flags |= 2;
 				pkt.ack = ACK;
 				serialize(pkt);
 				bool DROP_SIM = true;
-				#ifdef DEBUG 
-					//DROP_SIM = (rand() % 100) > 10;
+				#ifdef DROP 
+					DROP_SIM = (rand() % 100) > 10;
 				#endif
 				if (DROP_SIM && sendto(sockfd, &pkt, sizeof(Packet), 0, (struct sockaddr *)&servaddr, sizeof(servaddr)) < 0)
 				{
@@ -281,6 +276,11 @@ int main(int argc, char *argv[])
 					close(sockfd);
 					return errno;
 				}
+			}
+			if (is_ack)
+			{
+				/* If we have an ACK, call handle ACK*/
+				handle_ack(ACK, ack_count, client_pkt, send_buffer);
 			}
 		}
 		auto current_time = std::chrono::steady_clock::now();
@@ -292,12 +292,29 @@ int main(int argc, char *argv[])
 		/* 3. Handle retransmission: send a packet when the timer goes off; reset the timer when the send_buf is empty */
 		if (ack_count >= 3 || elapsed >= 1000)
 		{
+			if (ack_count >= 3)
+			{
+				/* Reset the ack counter */
+				ack_count = 0;
+				#ifdef DEBUG
+					fprintf(stderr, "Resetting the ack count...\n");
+				#endif 
+			}
+			if (elapsed >= 1000)
+			{	
+				/* Reset the timer */
+				last_time = current_time;
+				#ifdef DEBUG
+					fprintf(stderr, "Resetting the timer...\n");
+				#endif 
+			}
 			#ifdef DEBUG
-				//fprintf(stderr, "RETRANSMITTING...\n");
+				fprintf(stderr, "RETRANSMITTING...\n");
 			#endif
 			/* Resend what is at the top of the sending buffer */
-			if (send_buffer.size() > 0)
+			if (!send_buffer.empty())
 			{
+				//clean_send_buffer(ACK, send_buffer);
 				Packet retransmit = send_buffer.at(0);
 				serialize(retransmit);
 				bool DROP_SIM = true;
@@ -306,8 +323,10 @@ int main(int argc, char *argv[])
 				fprintf(stderr, "SEQ: %d\n", SEQ);
 				fprintf(stderr, "ELAPSED: %ld\n", elapsed);
 				fprintf(stderr, "ACK_COUNT: %d\n", ack_count);
-				//DROP_SIM = (rand() % 100) > 10;
 				print_diag(&retransmit, RTOS);
+			#endif
+			#ifdef DROP
+				DROP_SIM = (rand() % 100) > 10;
 			#endif
 				if (DROP_SIM && sendto(sockfd, &retransmit, sizeof(Packet), 0, (struct sockaddr *)&servaddr, sizeof(servaddr)) < 0)
 				{
@@ -315,16 +334,6 @@ int main(int argc, char *argv[])
 					close(sockfd);
 					return errno;
 				}
-			}
-			if (ack_count >= 3)
-			{
-				/* Reset the ack counter */
-				ack_count = 0;
-			}
-			if (elapsed >= 1000)
-			{	
-				/* Reset the timer */
-				last_time = current_time;
 			}
 		}
 	}

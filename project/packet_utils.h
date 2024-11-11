@@ -29,4 +29,4 @@ void serialize(Packet &pkt);							//for changing packets to network order
 void deserialize(Packet &pkt);							//for changing packets to host order
 void clean_send_buffer(uint32_t ACK, vector<Packet> &send_buffer); //
 void clean_recv_buffer(uint32_t &ACK, vector<Packet> &recv_buffer);
-void handle_ack(uint32_t &ack_count, const Packet &pkt, vector<Packet> &send_buffer);
+void handle_ack(uint32_t &ACK, uint32_t &ack_count, const Packet &pkt, vector<Packet> &send_buffer);
